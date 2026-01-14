@@ -1,6 +1,8 @@
 # PyInline – Python AST inliner/cleaner
 Simple python AST cleaner/inliner
 
+## NOT FOR REAL PROJECTS, EASY TO BREAK
+
 ## Requires python 3.9+
 
 ## How to use
