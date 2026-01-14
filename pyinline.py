@@ -138,7 +138,7 @@ class GetUnsedVars(ast.NodeVisitor):
         return self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
-        if not node.decorator_list:
+        if not node.decorator_list and node.type_comment != "ignore":
             self.unused[node.name] = 1
         return self.generic_visit(node)
 
@@ -148,6 +148,9 @@ class GetUnsedVars(ast.NodeVisitor):
         return self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+        for f in node.body:
+            if isinstance(f, ast.FunctionDef):
+                f.type_comment = "ignore"
         if not node.decorator_list:
             self.unused[node.name] = 1
         return self.generic_visit(node)
