@@ -2,7 +2,22 @@ import ast
 from argparse import ArgumentParser
 from typing import Any
 
-_types: set[type] = set([str, int, tuple, dict, float, set, list, bool])
+_types: set[type] = set(
+    [
+        str,
+        int,
+        float,
+        bool,
+        tuple,
+        list,
+        dict,
+        set,
+        frozenset,
+        bytes,
+        object,
+        type,
+    ]
+)
 types = {t.__name__: t for t in _types}
 
 
@@ -124,17 +139,17 @@ class GetUnsedVars(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
         if not node.decorator_list:
-            self.unused[node.name] = 2
+            self.unused[node.name] = 1
         return self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
         if not node.decorator_list:
-            self.unused[node.name] = 2
+            self.unused[node.name] = 1
         return self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> Any:
         if not node.decorator_list:
-            self.unused[node.name] = 2
+            self.unused[node.name] = 1
         return self.generic_visit(node)
 
 
