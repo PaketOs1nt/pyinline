@@ -2,23 +2,21 @@ import ast
 from argparse import ArgumentParser
 from typing import Any
 
-_types: set[type] = set(
-    [
-        str,
-        int,
-        float,
-        bool,
-        tuple,
-        list,
-        dict,
-        set,
-        frozenset,
-        bytes,
-        object,
-        type,
-    ]
-)
+_types: set[type] = {
+    str,
+    int,
+    float,
+    bool,
+    tuple,
+    list,
+    dict,
+    set,
+    frozenset,
+    bytes,
+}
 types = {t.__name__: t for t in _types}
+
+NOAST = ast.Module([], [])
 
 
 def cleaned_body(body: list[ast.stmt]):
@@ -109,6 +107,44 @@ class InlineOps(Layer):
         return self.generic_visit(node)
 
 
+class Collections2Const(Layer):
+    def visit_List(self, node: ast.List) -> Any:
+        canpack = True
+        for e in node.elts:
+            if not isinstance(e, ast.Constant):
+                canpack = False
+
+        if canpack:
+            c = ast.Constant([a.value for a in node.elts])  # type: ignore
+            return c
+        return self.generic_visit(node)
+
+
+class ExecEvalInline(Layer):
+    def view(self, node: ast.AST) -> Any:
+        hook_detector = TypeHookDetect()
+        hook_detector.visit(node)
+
+        self.renames = hook_detector.renames
+
+        return super().view(node)
+
+    def visit_Call(self, node: ast.Call) -> Any:
+        if (
+            len(node.args) == 1
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.func, ast.Name)
+            and isinstance(node.args[0].value, (str, bytes))
+            and node.func.id in ("eval", "exec")
+            and node.func.id not in self.renames
+        ):
+            try:
+                return ast.parse(node.args[0].value)
+            except Exception:
+                pass
+        return self.generic_visit(node)
+
+
 class NoStupidLambda(Layer):
     def visit_Call(self, node: ast.Call) -> Any:
         if isinstance(node.func, ast.Lambda) and isinstance(
@@ -156,6 +192,50 @@ class GetUnsedVars(ast.NodeVisitor):
         return self.generic_visit(node)
 
 
+class RemapName2Name(Layer):
+    def view(self, node: ast.AST) -> Any:
+        self.remap = {}
+        return super().view(node)
+
+    def visit_Assign(self, node: ast.Assign) -> Any:
+        if (
+            isinstance(node.value, ast.Name)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            self.remap[node.targets[0].id] = node.value.id
+            return NOAST
+        return self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> Any:
+        if node.id in self.remap:
+            return ast.Name(self.remap[node.id])
+
+        return self.generic_visit(node)
+
+
+class ConstInline(Layer):
+    def view(self, node: ast.AST) -> Any:
+        self.remap = {}
+        return super().view(node)
+
+    def visit_Assign(self, node: ast.Assign) -> Any:
+        if (
+            isinstance(node.value, ast.Constant)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            self.remap[node.targets[0].id] = node.value.value
+            return NOAST
+        return self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> Any:
+        if node.id in self.remap:
+            return ast.Constant(self.remap[node.id])
+
+        return self.generic_visit(node)
+
+
 class NoJunkVars(Layer):
     def view(self, node: ast.AST) -> Any:
         unused_detector = GetUnsedVars()
@@ -197,10 +277,22 @@ def main():
     parser = ArgumentParser(description="PyInline by @PaketPKSoftware")
     parser.add_argument("file", type=str, help="Original .py file path")
     parser.add_argument("passes", type=int, help="Pass count")
+    parser.add_argument("-novars", action="store_false", help="Disable NoJunkVars")
 
     args = parser.parse_args()
 
-    layers = [TypeCleaner, NoJunkConsts, InlineOps, NoStupidLambda, NoJunkVars]
+    layers = [
+        TypeCleaner,
+        NoJunkConsts,
+        InlineOps,
+        NoStupidLambda,
+        Collections2Const,
+        ExecEvalInline,
+        RemapName2Name,
+        ConstInline,
+    ]
+    if args.novars:
+        layers.append(NoJunkVars)
 
     with open(args.file, "rb") as f:
         raw_code = f.read()
